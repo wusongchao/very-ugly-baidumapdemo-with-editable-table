@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title></title>
+	<link rel="stylesheet" href="font-awesome/css/font-awesome.min.css">
+	<style type="text/css">
+		#content{
+			width: 100%;
+			/*height: 100%;*/
+			display: flex;
+		}
+		#left-menu{
+			min-width: 380px;
+			overflow-y: hidden;
+			border-right-style: groove;
+			border-right-style: double;
+		}
+		.top-bar{
+			display: flex;
+		}
+		.edit-area-top-button{
+			width: 50%;
+			background-color: #0075c7;
+			color: white;	
+			text-align: center;
+			border: 1px solid gray;
+			padding: 2px 1px;
+			/*border-radius: 5px;*/
+		}
+		.edit-area-top-button:hover{
+			cursor: pointer;
+		}
+		#data_table{
+			width: 100%;
+			border-collapse: collapse;
+			border:1px solid gray;
+		}
+		#generate-line-button{
+			width: 99%;
+			border:0;
+		}
+		td,th{
+			border:1px solid gray;
+			/*border-radius: 16px;*/
+			/*padding:2px 3px; */
+		}
+		#map-container{
+			/*width: 100%;*/
+	/*		height: 800px;
+			margin: 0;*/
+			width: 100%;
+			height: 940px;
+		}
+		.onmouseover-tr:hover{
+			background-color: #e0e0e0;
+		}
+		.onmouseclick-tr{
+			background-color:#039be5; 
+		}
+		.map-toolbar{
+			position: absolute;
+			z-index: 100;
+			right: 0px;
+			top:0px;
+			background: rgba(34,34,34,0.65);
+		}
+		.map-toolbar > a > span:hover{
+			background-color:gray;
+		}
+	</style>	
+	<script type="text/javascript" src="https://api.map.baidu.com/getscript?v=2.0&ak=dZEY70WX7QvqGjMqd86GX0Gy7PjZAzIe&services=&t=20170926125934"></script>
+</head>
+<body>
+<div id="content">
+	<div id="left-menu">
+		<div class="top-bar">
+			<div class="edit-area-top-button" id="add-point-button" v-on:click="addPointOnClick">增加节点</div>
+			<div class="edit-area-top-button" id="delete-point-button" v-on:click="deletePointOnClick">删除选中节点</div>
+		</div>
+		<div class="edit-area-top-button" id="generate-line-button" v-on:click="generateLineOnClick">生成线路</div>
+		<table id="data_table">
+			<tr>
+				<th></th>
+				<th>点类型</th>
+				<!-- <th></th> -->
+				<th>x</th>
+				<th>y</th>
+				<th>线路号</th>
+			</tr>
+			<tr class="onmouseover-tr" v-for="(point, index) of pointStore">
+				<td>
+					<input type="checkbox" ref="checkbox">
+				</td>
+				<td>
+					<select ref="p" v-on:change="lineTypeChange(point,index)">
+						<option value="0">普通插值点</option>
+						<option value="1">线路起点</option>
+						<option value="2">线路终点</option>
+						<option value="3">隧道起点</option>
+						<option value="4">隧道终点</option>
+					</select>
+				</td>
+				<!-- <td>{{point.type}}</td> -->
+				<td ref="xVal" contenteditable="true" v-on:blur="xValueChange(point,index)">{{point.x}}</td>
+				<td ref="yVal" contenteditable="true" v-on:blur="yValueChange(point,index)">{{point.y}}</td>
+				<td ref="lineIndexVal" contenteditable="true" v-on:blur="lineIndexValueChange(point,index)">{{point.lineIndex}}</td>
+			</tr>
+		</table>
+	</div>
+	<div class="map-toolbar list-group">
+		<a class="list-group-item" href="#"><span class="fa fa-plus fa-fw fa-2x" style="color:white" onclick="iconToolBarAddOnClick(event)"></span></a>
+	</div>
+	<div id="map-container"></div>
+</div>
+	
+</body>
+<script type="text/javascript" src="js/vue.js"></script>
+<script type="text/javascript">
+	var constantArea = {
+		pointConstant : {
+			COMMON_POINT:0,
+			LINE_START_POINT:1,
+			LINE_END_POINT:2,
+			TUNNEL_START_POINT:3,
+			TUNNEL_END_POINT:4
+		},
+		zoomMap: new Map()
+	};
+
+	var map;
+
+	var num = 0;
+
+	var initializeZoomMap = (datas) => {
+		for(let [key, value] of datas){
+			constantArea.zoomMap.set(key, value);
+		}
+	};
+
+	// cannot use arrow function in vue instance, so i choose to imple it in a ugly way like this
+	function notifyDecorator(listener,listenerFunc,sourceContext,sourceFunc){
+		return function(...args){
+			sourceFunc.call(sourceContext,args);
+			listenerFunc.call(listener,args);
+		}
+	}
+
+	class Point{
+		constructor(type, x, y, lineIndex=0){
+			this.type = type;
+			this.x = x;
+			this.y = y;
+			this.lineIndex = lineIndex;
+		}
+	}
+
+	class MapViewController{
+		constructor(){
+			this.markers = [];
+			this.polyline = null;
+			this.synchronizer = null;
+		}
+		initializeMap() {
+			map = new BMap.Map("map-container");
+			var point;
+			point = new BMap.Point(116.404, 39.915);	
+			map.centerAndZoom(point,15);
+			
+			map.addControl(new BMap.NavigationControl({type:BMAP_NAVIGATION_CONTROL_SMALL}));
+
+			map.enableScrollWheelZoom(true);
+
+			map.addEventListener("zoomend",function(){
+				console.log(this.getZoom());
+			});
+
+			initializeZoomMap([[1,2],[3,4]]);
+			console.log(constantArea.zoomMap);
+		}
+		addMarker([type,x,y,index=0]){
+	  		var marker = new BMap.Marker(new BMap.Point(x,y));
+	  		marker.enableDragging();
+	  		this.markers.push(marker);
+	  		map.addOverlay(marker);
+
+	  		var _self = this;
+
+	  		// use decorator to notify the vue model
+	  		// since the this is bind to a marker instance
+	  		marker.addEventListener("dragend",function(){
+	  			var point = this.getPosition();
+	  			var synchronizer = _self.synchronizer;
+	  			
+	  			//retrieve the index
+	 			var nowIndex = _self.markers.findIndex((n) => n==marker);
+
+  				notifyDecorator(synchronizer,synchronizer.proxyMethods.positionChange,_self,_self.resetMarkerPosition)(point.lng,point.lat,nowIndex);
+	  		});
+		}
+		deleteMarker([index]){
+			map.removeOverlay(this.markers[index]);
+			this.markers.splice(index,1);
+		}
+		resetMarkerPosition([x,y,indexInStore]){
+			this.markers[indexInStore].setPosition(new BMap.Point(x,y));
+		}
+		resetMapCenterPosition(index){
+			var point = pointStore[index];
+			if(point.type == constantArea.pointConstant.LINE_START_POINT){
+				if(map != null){
+					map.centerAndZoom(new BMap.Point(point.x,point.y),15);
+				}
+			}
+		}
+		generateLine(){
+			if(this.polyline != null){
+				map.removeOverlay(this.polyline);
+			}
+
+			var points = [];
+			for(let marker of this.markers){
+				points.push(marker.getPosition());
+			}
+
+			this.polyline = new BMap.Polyline(points, {strokeColor:"blue", strokeWeight:2, strokeOpacity:0.5});   //创建折线
+			map.addOverlay(this.polyline);   //增加折线
+		}
+		watch(instance){
+			this.synchronizer = instance;
+			// to derive originnal methods from instance's prototype
+
+			var addPoint = instance.addPoint;
+			var positionChange = instance.positionChange;
+			var deletePoint = instance.deletePoint;
+			instance.proxyMethods = {
+				addPoint,positionChange,deletePoint
+			};
+			// save context
+			var _self = this;
+
+			// create new method in instance to replace same name method in prototype
+			// not an elegant way, actually quite ugly(same as my english)
+			instance.addPoint = function([type,x,y,index=0]){
+				let args = [type,x,y,index];
+				_self.addMarker(args);
+				addPoint.call(instance,args);
+			};
+			instance.positionChange = function([x,y,indexInStore]){
+				let args = [x,y,indexInStore];
+				_self.resetMarkerPosition(args);
+				_self.resetMapCenterPosition(indexInStore);
+				positionChange.call(instance,args);
+			}
+			instance.deletePoint = function([i]){
+				_self.deleteMarker([i]);
+				deletePoint.call(instance,[i]);
+			}
+		}
+	}
+
+	function iconToolBarAddOnClick(mouseEvent){
+		var OFFSET = 0.001;
+		var newPointx = pointStore[pointStore.length-1].x + OFFSET;
+		var newPointy = pointStore[pointStore.length-1].y + OFFSET;
+
+		var args = [constantArea.pointConstant.COMMON_POINT,newPointx,newPointy];
+
+		mapViewController.addMarker(args);
+		mapViewController.synchronizer.proxyMethods.addPoint(args);
+	}
+
+	var pointStore = new Array();
+
+
+	var pointStoreVueModel = new Vue({
+		el:"#left-menu",
+		data:{
+			eventTracer:1,
+			pointStore:pointStore,
+			activePoint:null,
+		},
+		created:function(){
+		},
+		methods:{
+			// setAsList:function(){
+			// 	return this.eventTracer && Array.from(pointStore);
+			// },
+			addPoint:function([type,x,y,index=0]){
+				this.pointStore.push(new Point(type,x,y,index));
+				this.eventTracer+=1;
+			},
+			addPointOnClick:function(mouseEvent){
+				//this.pointStore.push(new Point(constantArea.pointConstant.COMMON_POINT,0,0,0));
+				var OFFSET = 0.001;
+				this.eventTracer+=1;
+				this.addPoint([constantArea.pointConstant.COMMON_POINT,pointStore[pointStore.length-1].x + OFFSET,pointStore[pointStore.length-1].y + OFFSET,0]);
+			},
+			selected:function (selectedPoint) {
+				this.activePoint = selectedPoint;
+			},
+			lineTypeChange:function(point,index) {
+				this.$set(point,"type",this.$refs.p[index].options.selectedIndex)
+				mapViewController.resetMapCenterPosition(index);
+			},
+			positionChange:function([x,y,indexInStore]){
+				// console.log(indexInStore);
+				this.$set(this.pointStore[indexInStore],"x",x);
+				this.$set(this.pointStore[indexInStore],"y",y);
+			},
+			xValueChange:function(point,index) {
+				this.positionChange([Number(this.$refs.xVal[index].innerText),Number(this.$refs.yVal[index].innerText),index]);
+			},
+			yValueChange:function(point,index) {
+				this.positionChange([Number(this.$refs.xVal[index].innerText),Number(this.$refs.yVal[index].innerText),index]);
+			},
+			lineIndexValueChange:function(point,index) {
+				point.lineIndex = Number(this.$refs.lineIndexVal[index].innerText);
+			},
+			deletePoint:function([i]){
+				pointStore.splice(i,1);
+			},
+			deletePointOnClick:function(mouseEvent){
+				//reverse iteration order
+				for(let i = pointStore.length - 1; i >= 0; i--){
+					if(this.$refs.checkbox[i].checked == true){
+						// this.deletePoint(i);
+						this.deletePoint([i]);
+						this.eventTracer+=1;
+					}
+				}
+
+				// to prevent that after deleting points, there're still some of points' checkbox are selected
+				for(let j of this.$refs.checkbox){
+					j.checked = false;
+				}
+			},
+			modifyPoint:function(pointIndex,property,value){
+				this.$set(pointStore[pointIndex],property,value);
+			},
+			generateLineOnClick:function(){
+				mapViewController.generateLine();
+			}
+		}
+	});
+
+	var mapViewController = new MapViewController();
+
+	mapViewController.initializeMap();
+
+	// only watch the baiduMapPointStore
+	mapViewController.watch(pointStoreVueModel);
+
+	pointStoreVueModel.addPoint.call(pointStoreVueModel,[constantArea.pointConstant.COMMON_POINT,116.404,39.915,1]);
+
+</script>
+</html>
