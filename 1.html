@@ -116,7 +116,7 @@
 </body>
 <script type="text/javascript" src="js/vue.js"></script>
 <script type="text/javascript">
-	var constantArea = {
+	let constantArea = {
 		pointConstant : {
 			COMMON_POINT:0,
 			LINE_START_POINT:1,
@@ -127,11 +127,11 @@
 		zoomMap: new Map()
 	};
 
-	var map;
+	let map;
 
-	var num = 0;
+	let num = 0;
 
-	var initializeZoomMap = (datas) => {
+	let initializeZoomMap = (datas) => {
 		for(let [key, value] of datas){
 			constantArea.zoomMap.set(key, value);
 		}
@@ -162,7 +162,7 @@
 		}
 		initializeMap() {
 			map = new BMap.Map("map-container");
-			var point;
+			let point;
 			point = new BMap.Point(116.404, 39.915);	
 			map.centerAndZoom(point,15);
 			
@@ -170,42 +170,52 @@
 
 			map.enableScrollWheelZoom(true);
 
-			map.addEventListener("zoomend",function(){
-				console.log(this.getZoom());
-			});
+			// map.addEventListener("zoomend",function(){
+			// 	console.log(this.getZoom());
+			// });
 
 			initializeZoomMap([[1,2],[3,4]]);
-			console.log(constantArea.zoomMap);
 		}
 		addMarker([type,x,y,index=0]){
-	  		var marker = new BMap.Marker(new BMap.Point(x,y));
+	  		let marker = new BMap.Marker(new BMap.Point(x,y));
 	  		marker.enableDragging();
 	  		this.markers.push(marker);
 	  		map.addOverlay(marker);
 
-	  		var _self = this;
+	  		let _self = this;
 
 	  		// use decorator to notify the vue model
-	  		// since the this is bind to a marker instance
+	  		// since the this is bind to a marker instance, cannot use arrow function
 	  		marker.addEventListener("dragend",function(){
-	  			var point = this.getPosition();
-	  			var synchronizer = _self.synchronizer;
+	  			let point = this.getPosition();
+	  			let synchronizer = _self.synchronizer;
 	  			
-	  			//retrieve the index
-	 			var nowIndex = _self.markers.findIndex((n) => n==marker);
+	  			// retrieve the index
+	  			// since marker may be deleted, use this instead of store it in instance
+	 			let nowIndex = _self.markers.indexOf(marker);
 
   				notifyDecorator(synchronizer,synchronizer.proxyMethods.positionChange,_self,_self.resetMarkerPosition)(point.lng,point.lat,nowIndex);
+  				_self.generateLine();
 	  		});
+	  		marker.addEventListener("dragging",function(){
+	  			clearTimeout(this._onDragTimerId)
+	  			this._onDragTimerId = setTimeout(function(){
+	  				_self.generateLine();
+	  			}, 10);
+	  		});
+	  		this.generateLine();
 		}
 		deleteMarker([index]){
 			map.removeOverlay(this.markers[index]);
 			this.markers.splice(index,1);
+			this.generateLine();
 		}
 		resetMarkerPosition([x,y,indexInStore]){
 			this.markers[indexInStore].setPosition(new BMap.Point(x,y));
+			this.generateLine();
 		}
 		resetMapCenterPosition(index){
-			var point = pointStore[index];
+			let point = pointStore[index];
 			if(point.type == constantArea.pointConstant.LINE_START_POINT){
 				if(map != null){
 					map.centerAndZoom(new BMap.Point(point.x,point.y),15);
@@ -217,7 +227,7 @@
 				map.removeOverlay(this.polyline);
 			}
 
-			var points = [];
+			let points = [];
 			for(let marker of this.markers){
 				points.push(marker.getPosition());
 			}
@@ -229,14 +239,14 @@
 			this.synchronizer = instance;
 			// to derive originnal methods from instance's prototype
 
-			var addPoint = instance.addPoint;
-			var positionChange = instance.positionChange;
-			var deletePoint = instance.deletePoint;
+			let addPoint = instance.addPoint;
+			let positionChange = instance.positionChange;
+			let deletePoint = instance.deletePoint;
 			instance.proxyMethods = {
 				addPoint,positionChange,deletePoint
 			};
 			// save context
-			var _self = this;
+			let _self = this;
 
 			// create new method in instance to replace same name method in prototype
 			// not an elegant way, actually quite ugly(same as my english)
@@ -259,20 +269,20 @@
 	}
 
 	function iconToolBarAddOnClick(mouseEvent){
-		var OFFSET = 0.001;
-		var newPointx = pointStore[pointStore.length-1].x + OFFSET;
-		var newPointy = pointStore[pointStore.length-1].y + OFFSET;
+		let OFFSET = 0.001;
+		let newPointx = pointStore[pointStore.length-1].x + OFFSET;
+		let newPointy = pointStore[pointStore.length-1].y + OFFSET;
 
-		var args = [constantArea.pointConstant.COMMON_POINT,newPointx,newPointy];
+		let args = [constantArea.pointConstant.COMMON_POINT,newPointx,newPointy];
 
 		mapViewController.addMarker(args);
 		mapViewController.synchronizer.proxyMethods.addPoint(args);
 	}
 
-	var pointStore = new Array();
+	let pointStore = new Array();
 
 
-	var pointStoreVueModel = new Vue({
+	let pointStoreVueModel = new Vue({
 		el:"#left-menu",
 		data:{
 			eventTracer:1,
@@ -291,7 +301,7 @@
 			},
 			addPointOnClick:function(mouseEvent){
 				//this.pointStore.push(new Point(constantArea.pointConstant.COMMON_POINT,0,0,0));
-				var OFFSET = 0.001;
+				let OFFSET = 0.001;
 				this.eventTracer+=1;
 				this.addPoint([constantArea.pointConstant.COMMON_POINT,pointStore[pointStore.length-1].x + OFFSET,pointStore[pointStore.length-1].y + OFFSET,0]);
 			},
@@ -343,7 +353,7 @@
 		}
 	});
 
-	var mapViewController = new MapViewController();
+	let mapViewController = new MapViewController();
 
 	mapViewController.initializeMap();
 
