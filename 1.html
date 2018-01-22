@@ -92,12 +92,9 @@
 					<input type="checkbox" ref="checkbox">
 				</td>
 				<td>
-					<select ref="p" v-on:change="lineTypeChange(point,index)">
-						<option value="0">普通插值点</option>
-						<option value="1">线路起点</option>
-						<option value="2">线路终点</option>
-						<option value="3">隧道起点</option>
-						<option value="4">隧道终点</option>
+					<select v-on:change="lineTypeChange($event, point)">
+						<!-- <option value="" disabled selected>空</option> -->
+						<option v-for="type of pointTypesStore" :value="type.id">{{type.name}}</option>
 					</select>
 				</td>
 				<!-- <td>{{point.type}}</td> -->
@@ -110,30 +107,26 @@
 	<div class="map-toolbar list-group">
 		<a class="list-group-item" href="#"><span class="fa fa-plus fa-fw fa-2x" style="color:white" onclick="iconToolBarAddOnClick(event)"></span></a>
 	</div>
-	<div id="map-container"></div>
+	<div id="map-container"></div>		
 </div>
 	
 </body>
 <script type="text/javascript" src="js/vue.js"></script>
 <script type="text/javascript">
-	let constantArea = {
-		pointConstant : {
-			COMMON_POINT:0,
-			LINE_START_POINT:1,
-			LINE_END_POINT:2,
-			TUNNEL_START_POINT:3,
-			TUNNEL_END_POINT:4
+	let Constants = {
+		Point : {
+			COMMON_POINT:{id:0, name:"普通插值点"},
+			LINE_START_POINT:{id:1, name:"线路起点"},
+			LINE_END_POINT:{id:2, name:"线路终点"},
+			TUNNEL_START_POINT:{id:3, name:"线路终点"},
+			TUNNEL_END_POINT:{id:4, name:"隧道终点"}
 		},
-		zoomMap: new Map()
+		ZoomMap: new Map()
 	};
-
-	let map;
-
-	let num = 0;
-
+	
 	let initializeZoomMap = (datas) => {
 		for(let [key, value] of datas){
-			constantArea.zoomMap.set(key, value);
+			Constants.ZoomMap.set(key, value);
 		}
 	};
 
@@ -158,29 +151,25 @@
 		constructor(){
 			this.markers = [];
 			this.polyline = null;
-			this.synchronizer = null;
+			this.map = null;
+			// this.initializeMap(containerId);
 		}
-		initializeMap() {
-			map = new BMap.Map("map-container");
-			let point;
-			point = new BMap.Point(116.404, 39.915);	
-			map.centerAndZoom(point,15);
+		initializeMap(containerId) {
+			this.map = new BMap.Map(containerId);
+			let point = new BMap.Point(116.404, 39.915);	
+			this.map.centerAndZoom(point,15);
 			
-			map.addControl(new BMap.NavigationControl({type:BMAP_NAVIGATION_CONTROL_SMALL}));
+			this.map.addControl(new BMap.NavigationControl({type:BMAP_NAVIGATION_CONTROL_SMALL}));
 
-			map.enableScrollWheelZoom(true);
-
-			// map.addEventListener("zoomend",function(){
-			// 	console.log(this.getZoom());
-			// });
+			this.map.enableScrollWheelZoom(true);
 
 			initializeZoomMap([[1,2],[3,4]]);
 		}
-		addMarker([type,x,y,index=0]){
+		addMarker(type,x,y,index,bus){
 	  		let marker = new BMap.Marker(new BMap.Point(x,y));
 	  		marker.enableDragging();
 	  		this.markers.push(marker);
-	  		map.addOverlay(marker);
+	  		this.map.addOverlay(marker);
 
 	  		let _self = this;
 
@@ -188,13 +177,13 @@
 	  		// since the this is bind to a marker instance, cannot use arrow function
 	  		marker.addEventListener("dragend",function(){
 	  			let point = this.getPosition();
-	  			let synchronizer = _self.synchronizer;
 	  			
 	  			// retrieve the index
 	  			// since marker may be deleted, use this instead of store it in instance
 	 			let nowIndex = _self.markers.indexOf(marker);
 
-  				notifyDecorator(synchronizer,synchronizer.proxyMethods.positionChange,_self,_self.resetMarkerPosition)(point.lng,point.lat,nowIndex);
+  				bus.$emit("position-change-from-map-view", point.lng,point.lat,nowIndex);
+
   				_self.generateLine();
 	  		});
 	  		marker.addEventListener("dragging",function(){
@@ -203,139 +192,90 @@
 	  				_self.generateLine();
 	  			}, 10);
 	  		});
-	  		this.generateLine();
 		}
-		deleteMarker([index]){
-			map.removeOverlay(this.markers[index]);
-			this.markers.splice(index,1);
-			this.generateLine();
+		deleteMarker(indexInStore){
+			this.map.removeOverlay(this.markers[indexInStore]);
+			this.markers.splice(indexInStore,1);
 		}
-		resetMarkerPosition([x,y,indexInStore]){
+		resetMarkerPosition(x,y,indexInStore){
 			this.markers[indexInStore].setPosition(new BMap.Point(x,y));
-			this.generateLine();
 		}
-		resetMapCenterPosition(index){
-			let point = pointStore[index];
-			if(point.type == constantArea.pointConstant.LINE_START_POINT){
-				if(map != null){
-					map.centerAndZoom(new BMap.Point(point.x,point.y),15);
-				}
-			}
+		resetMapCenterPosition(point){
+			console.log(point);
+			this.map.centerAndZoom(new BMap.Point(point.x,point.y),15);	
 		}
 		generateLine(){
 			if(this.polyline != null){
-				map.removeOverlay(this.polyline);
+				this.map.removeOverlay(this.polyline);
 			}
 
-			let points = [];
-			for(let marker of this.markers){
-				points.push(marker.getPosition());
-			}
+			let points = this.markers.map((marker) => marker.getPosition());
 
 			this.polyline = new BMap.Polyline(points, {strokeColor:"blue", strokeWeight:2, strokeOpacity:0.5});   //创建折线
-			map.addOverlay(this.polyline);   //增加折线
-		}
-		watch(instance){
-			this.synchronizer = instance;
-			// to derive originnal methods from instance's prototype
-
-			let addPoint = instance.addPoint;
-			let positionChange = instance.positionChange;
-			let deletePoint = instance.deletePoint;
-			instance.proxyMethods = {
-				addPoint,positionChange,deletePoint
-			};
-			// save context
-			let _self = this;
-
-			// create new method in instance to replace same name method in prototype
-			// not an elegant way, actually quite ugly(same as my english)
-			instance.addPoint = function([type,x,y,index=0]){
-				let args = [type,x,y,index];
-				_self.addMarker(args);
-				addPoint.call(instance,args);
-			};
-			instance.positionChange = function([x,y,indexInStore]){
-				let args = [x,y,indexInStore];
-				_self.resetMarkerPosition(args);
-				_self.resetMapCenterPosition(indexInStore);
-				positionChange.call(instance,args);
-			}
-			instance.deletePoint = function([i]){
-				_self.deleteMarker([i]);
-				deletePoint.call(instance,[i]);
-			}
+			this.map.addOverlay(this.polyline);   //增加折线
 		}
 	}
 
-	function iconToolBarAddOnClick(mouseEvent){
-		let OFFSET = 0.001;
-		let newPointx = pointStore[pointStore.length-1].x + OFFSET;
-		let newPointy = pointStore[pointStore.length-1].y + OFFSET;
+	let pointStore = [];
 
-		let args = [constantArea.pointConstant.COMMON_POINT,newPointx,newPointy];
-
-		mapViewController.addMarker(args);
-		mapViewController.synchronizer.proxyMethods.addPoint(args);
-	}
-
-	let pointStore = new Array();
-
+	let bus = new Vue();
 
 	let pointStoreVueModel = new Vue({
 		el:"#left-menu",
 		data:{
-			eventTracer:1,
 			pointStore:pointStore,
 			activePoint:null,
+			pointTypesStore:Constants.Point
 		},
 		created:function(){
+			bus.$on("add-point-from-map-view", this.addPoint);
+			bus.$on("position-change-from-map-view", this.positionChange);
 		},
 		methods:{
-			// setAsList:function(){
-			// 	return this.eventTracer && Array.from(pointStore);
-			// },
-			addPoint:function([type,x,y,index=0]){
+			addPoint:function(type,x,y,index=0){
 				this.pointStore.push(new Point(type,x,y,index));
-				this.eventTracer+=1;
 			},
-			addPointOnClick:function(mouseEvent){
-				//this.pointStore.push(new Point(constantArea.pointConstant.COMMON_POINT,0,0,0));
-				let OFFSET = 0.001;
-				this.eventTracer+=1;
-				this.addPoint([constantArea.pointConstant.COMMON_POINT,pointStore[pointStore.length-1].x + OFFSET,pointStore[pointStore.length-1].y + OFFSET,0]);
+			addPointOnClick:function(){
+				const OFFSET = 0.001;
+				let args = [Constants.Point.COMMON_POINT,pointStore[pointStore.length-1].x + OFFSET,pointStore[pointStore.length-1].y + OFFSET,0];
+				this.addPoint(...args);
+				bus.$emit("add-point-from-store", ...args);
 			},
 			selected:function (selectedPoint) {
 				this.activePoint = selectedPoint;
 			},
-			lineTypeChange:function(point,index) {
-				this.$set(point,"type",this.$refs.p[index].options.selectedIndex)
-				mapViewController.resetMapCenterPosition(index);
+			lineTypeChange:function(event, point) {
+				point.type = parseInt(event.target.value);
+				if(point.type == Constants.Point.LINE_START_POINT.id){
+					bus.$emit("reset-center-position", point);
+				}
 			},
-			positionChange:function([x,y,indexInStore]){
-				// console.log(indexInStore);
+			positionChange:function(x,y,indexInStore){
 				this.$set(this.pointStore[indexInStore],"x",x);
 				this.$set(this.pointStore[indexInStore],"y",y);
 			},
-			xValueChange:function(point,index) {
-				this.positionChange([Number(this.$refs.xVal[index].innerText),Number(this.$refs.yVal[index].innerText),index]);
+			xValueChange:function(point,indexInStore) {
+				// since i think innerText is not that good to bind
+				this.positionChange(parseFloat(this.$refs.xVal[indexInStore].innerText),parseFloat(this.$refs.yVal[indexInStore].innerText),indexInStore);
+				bus.$emit("position-change-from-store",point.x,point.y,indexInStore);
 			},
-			yValueChange:function(point,index) {
-				this.positionChange([Number(this.$refs.xVal[index].innerText),Number(this.$refs.yVal[index].innerText),index]);
+			yValueChange:function(point,indexInStore) {
+				this.positionChange(parseFloat(this.$refs.xVal[indexInStore].innerText),parseFloat(this.$refs.yVal[indexInStore].innerText),indexInStore);
+				bus.$emit("position-change-from-store",x,y,indexInStore);
 			},
-			lineIndexValueChange:function(point,index) {
-				point.lineIndex = Number(this.$refs.lineIndexVal[index].innerText);
+			lineIndexValueChange:function(point,indexInStore) {
+				point.lineIndex = parseFloat(this.$refs.lineIndexVal[indexInStore].innerText);
 			},
-			deletePoint:function([i]){
+			deletePoint:function(i){
 				pointStore.splice(i,1);
 			},
-			deletePointOnClick:function(mouseEvent){
+			deletePointOnClick:function(){
 				//reverse iteration order
 				for(let i = pointStore.length - 1; i >= 0; i--){
 					if(this.$refs.checkbox[i].checked == true){
 						// this.deletePoint(i);
-						this.deletePoint([i]);
-						this.eventTracer+=1;
+						this.deletePoint(i);
+						bus.$emit("delete-point-from-store", i);
 					}
 				}
 
@@ -344,23 +284,64 @@
 					j.checked = false;
 				}
 			},
-			modifyPoint:function(pointIndex,property,value){
-				this.$set(pointStore[pointIndex],property,value);
-			},
 			generateLineOnClick:function(){
-				mapViewController.generateLine();
+				bus.$emit("generate-line-from-store");
+				// mapViewController.generateLine();
 			}
 		}
 	});
 
-	let mapViewController = new MapViewController();
 
-	mapViewController.initializeMap();
 
-	// only watch the baiduMapPointStore
-	mapViewController.watch(pointStoreVueModel);
+	let mapVueModel = new Vue({
+		data:{
+			mapViewController:new MapViewController()
+		},
+		created:function() {
+			this.mapViewController.initializeMap("map-container");
 
-	pointStoreVueModel.addPoint.call(pointStoreVueModel,[constantArea.pointConstant.COMMON_POINT,116.404,39.915,1]);
+			bus.$on("add-point-from-store", this.onAddPointFromStore);
+			bus.$on("reset-center-position", this.onResetCenterPosition);
+			bus.$on("position-change-from-store", this.onPositionChangeFromStore);
+			bus.$on("delete-point-from-store", this.onDeletePointFromStore);
+			bus.$on("generate-line-from-store", this.onGenerateLineFromStore);
+		},
+		methods:{
+			onAddPointFromStore:function(type,x,y,index){
+				this.mapViewController.addMarker(type, x, y, index, bus);
+				this.mapViewController.generateLine();
+			},
+			onResetCenterPosition:function(point) {
+				this.mapViewController.resetMapCenterPosition(point);
+			},
+			onPositionChangeFromStore:function(x,y,indexInStore){
+				this.mapViewController.resetMarkerPosition(x, y, indexInStore);
+				this.mapViewController.generateLine();
+			},
+			onDeletePointFromStore:function(indexInStore){
+				this.mapViewController.deleteMarker(indexInStore);
+				this.mapViewController.generateLine();
+			},
+			onGenerateLineFromStore:function(){
+				this.mapViewController.generateLine();
+			}
+		}
+	});
 
+	function iconToolBarAddOnClick(mouseEvent){
+		const OFFSET = 0.001;
+
+		let args = [
+			Constants.Point.COMMON_POINT,
+			pointStore[pointStore.length-1].x + OFFSET,
+			pointStore[pointStore.length-1].y + OFFSET
+		];
+
+		mapVueModel.mapViewController.addMarker(...args);
+		bus.$emit("add-point-from-map-view", ...args);
+	}
+
+	pointStoreVueModel.addPoint(Constants.Point.COMMON_POINT,116.404,39.915,1);
+	bus.$emit("add-point-from-store", Constants.Point.COMMON_POINT,116.404,39.915,1);
 </script>
 </html>
